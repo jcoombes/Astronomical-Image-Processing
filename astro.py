@@ -10,12 +10,13 @@ import numpy as np
 from scipy import stats #Used to find the mode. stats.mode(nostar)
 import matplotlib.pyplot as plt
 import csv
+import time #used to uniquely name the catalogue files.
 
 
 def scale_lower(pic, dimmer=3600): 
     """Using for loop to replace bright pixels with dimmer value.
     Input:
-        pic - expects numpy.array()
+        pic - numpy.array(), the image to be dimmed
         dimmer - int, how low should the "lowpass cutoff" be.
         
     Do I want to subtract off the Background count (=min(pic.flat)) before I replace with zero???!?!?!?!"""
@@ -24,43 +25,48 @@ def scale_lower(pic, dimmer=3600):
         for colno in range(pic.shape[1]):
             if pic[rowno][colno] > dimmer:
                 pic[rowno][colno] = dimmer
-#            if pic[rowno][colno] != 0:
-#                pic[rowno][colno] = np.log10(pic[rowno][colno]) #TO_DO Is this saving values as an integer??!!?!
+
     return pic
 
-def bg_annulus(pic,radius,centrex,centrey,lower_limit_sigma=0.1):
+#def bg_annulus(pic,radius,centrex,centrey,lower_limit_sigma=0.1):
+#
+#    mean = 3423.78
+#    lower_limit_galaxy_brightness = mean+lower_limit_sigma*13.5
+#    
+#    small_circle_list=[]
+#    large_circle_list=[]
+#    annular_list=[]
+#    small_circle= circles(radius,centrex,centrey)
+#    large_circle= circles(2*radius,centrex,centrey)
+#    for i in small_circle:
+#        small_circle_list.append(i)
+#    for i in large_circle:
+#        large_circle_list.append(i)
+#    for i in large_circle_list:
+#        if i not in small_circle_list:
+#            annular_list.append(i)
+#    
+#    local_background_pixel_values = []
+#    pixel_values_galaxy_var= []
+#
+#    for i in annular_list:
+#        if pic[i[1]][i[0]] >= lower_limit_galaxy_brightness:
+#            local_background_pixel_values.append(pic[i[1]][i[0]])
+#        else:
+#            local_background_pixel_values.append(mean)
+#    for i in small_circle_list:
+#        pixel_values_galaxy_var.append(pic[i[1]][i[0]])
+#    
+#    mean_local_background = sum(local_background_pixel_values)/len(local_background_pixel_values)
+#    
+#    return mean_local_background      
 
-    mean = 3423.78
-    lower_limit_galaxy_brightness = mean+lower_limit_sigma*13.5
+def bg_annulus(pic, radius, centrex, centrey, lower_limit_sigma = 0.1):
+    """
+    Returns the 
+    """
+    return None
     
-    small_circle_list=[]
-    large_circle_list=[]
-    annular_list=[]
-    small_circle= circles(radius,centrex,centrey)
-    large_circle= circles(2*radius,centrex,centrey)
-    for i in small_circle:
-        small_circle_list.append(i)
-    for i in large_circle:
-        large_circle_list.append(i)
-    for i in large_circle_list:
-        if i not in small_circle_list:
-            annular_list.append(i)
-    
-    local_background_pixel_values = []
-    pixel_values_galaxy_var= []
-
-    for i in annular_list:
-        if pic[i[1]][i[0]] >= lower_limit_galaxy_brightness:
-            local_background_pixel_values.append(pic[i[1]][i[0]])
-        else:
-            local_background_pixel_values.append(mean)
-    for i in small_circle_list:
-        pixel_values_galaxy_var.append(pic[i[1]][i[0]])
-    
-    mean_local_background = sum(local_background_pixel_values)/len(local_background_pixel_values)
-    
-    return mean_local_background      
-
 
 def cover_box(xmin, xmax, ymin, ymax, pic):
     """
@@ -107,7 +113,6 @@ def circles(radius, centrex, centrey):
     """
     for width in range(-1* radius, radius+1):
         y_diff = int(round(np.sqrt(radius * radius - width * width),0))
-        #print "y_diff is {}".format(y_diff)
         for height in range(-1 * y_diff, y_diff + 1):
             yield((centrex + width,centrey+height))
 
@@ -123,16 +128,16 @@ def mask_to_cat(pic, aperture = 6, out = None):
         output - dict, where do we put this galaxy metadata?
         
     """
-    if out == None:
-        out = {}
+    if out == None: # This stops the problem with default mutable arguments
+        out = {}    # mutating between function calls.
     gal_int = np.max(pic)
     gal_rowcol = np.unravel_index(np.argmax(pic),pic.shape)
     #flatten array, find flat coord of max value, flat coord -> pic coord. 
-    gal_bg = bg_annulus(pic,aperture/2,gal_rowcol[1],gal_rowcol[0])
+    gal_bg = bg_annulus(pic,aperture,gal_rowcol[1],gal_rowcol[0])
     
-    out['coords'] = gal_rowcol    
+    out['coords'] = gal_rowcol
     out['intensity'] = gal_int
-    out['background'] = gal_bg 
+    out['background'] = gal_bg
     mask_pic = cover_circle(aperture, gal_rowcol[1], gal_rowcol[0], pic)
     return mask_pic, out
 
@@ -146,7 +151,7 @@ def build_catalogue(pic, aperture = 6, out = None, fmin = 3500):
     current = new_pic.max()
     while new_pic.max() > fmin:
         if current < former:
-            print "max brightness at {} \n".format(current)
+            print ("max brightness at {} \n".format(current))
         former = new_pic.max()
         new_pic, gal_data = mask_to_cat(new_pic, aperture, out)
         current = new_pic.max()
@@ -189,9 +194,10 @@ for rowno in range(pic.shape[0]):
 
 "***************************main code***********************************"
 if __name__ == "__main__":
-    with open('cat2.csv', 'w') as f:
+    timestr = time.strftime("%Y%m%d-%H%M%S") + '.csv'
+    with open(timestr, 'w') as f: #This file will become our catalogue.
         #Open file and slice.
-        hdulist = fits.open("H:\\Year 3\Astro\A1_mosaic\A1_mosaic.fits")
+        hdulist = fits.open("C:\\Users\Joaquin\Documents\Year 3\Astronomical Image Processing\A1_mosaic.fits")
     
         pic = np.array(hdulist[0].data)
         pic = pic[890:4310,370:2150] #this is a better slice. Grabs a reasonable section.
@@ -216,7 +222,7 @@ if __name__ == "__main__":
         #plt.yscale('log', nonposy='clip')
         #plt.hist(nostar)
         ##################Write to CSV#######################
-        galaxies, nostar9 = build_catalogue(nostar8, 20, fmin = 3500) 
+        galaxies, nostar9 = build_catalogue(nostar8, 40, fmin = 3440) 
         fieldnames = ['coords','intensity','background']
         writer = csv.DictWriter(f, fieldnames = fieldnames)
         
