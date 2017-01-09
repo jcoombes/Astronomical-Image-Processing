@@ -61,12 +61,63 @@ def scale_lower(pic, dimmer=3600):
 #    
 #    return mean_local_background      
 
-def bg_annulus(pic, radius, centrex, centrey, lower_limit_sigma = 0.1):
+def aperture_photometry(radius, centrex, centrey, pic):
     """
-    Returns the 
-    We expect annulus to be the diameter.
+    This function counts the total intensity within a circle,
+    then finds the average background for the annulus surrounding that circle,
+    and subtracts the background off to give a corrected intensity.
+    Note that for extended objects, a larger radius might have a greater corrected intensity.
+    
+    Inputs,
+        radius - int, how large a circle of the image do we want to measure?
+        centrex - int, ordinate of centre of circle and annulus.
+        centrey - int, abscissa of centre of circle and annulus.
+        pic - 2d numpy masked array.
+    
+    Returns,
+        correct_intensity, - int, how bright is the galaxy?
+        circle_background -int, how much brightness correction was subtracted
+                                to give the corrected intensity count?
     """
-    return None
+    assert type(pic) == np.ma.core.MaskedArray
+    
+    rows = [] #These two lists are used with advanced array slicing
+    cols = [] #to pick out the bit of the masked array we want.
+    
+    inner_ring = []
+    
+    outer_ring_rows = []
+    outer_ring_cols = []
+    #This approach ensures we don't include masked values in our calculations.
+    
+    smaller_circle_coords = ((x,y) for x, y in circles(radius, centrex, centrey) \
+              if 0 <= x < pic.shape[1] if 0<= y < pic.shape[0])
+    
+    bigger_circle_coords =  ((x,y) for x, y in circles(radius, centrex, centrey) \
+                       if 0 <= x < pic.shape[1] if 0<= y < pic.shape[0])
+    
+    for x, y in smaller_circle_coords:
+        rows.append(y)
+        cols.append(x)
+        inner_ring.append((x,y))
+    
+    for x,y in bigger_circle_coords:
+        if (x,y) not in inner_ring:
+            outer_ring_rows.append(y)
+            outer_ring_cols.append(x)
+    
+    #Now, we have build our advanced slicing list indices.
+    #We can make a masked array view with only the pixels we want 
+    #using pic[rows, cols]
+    circle_array = pic[rows, cols]
+    annulus_array = pic[outer_ring_rows, outer_ring_cols]
+    
+    total_count = circle_array.sum()
+    background_per_pixel = annulus_array.mean()
+    circle_background = annulus_array.mean() * circle_array.count()
+    correct_intensity = total_count - circle_background 
+    
+    return correct_intensity, circle_background #This result scales with aperture size ^2. 
 
 def cover_box(xmin, xmax, ymin, ymax, pic):
     """
@@ -140,12 +191,11 @@ def mask_to_cat(pic, aperture = 6, out = None):
     
     if out == None: # This stops the problem with default mutable arguments
         out = {}    # mutating between function calls.
-    gal_int = pic.max()
     gal_rowcol = np.unravel_index(pic.argmax(),pic.shape)
     #flatten array, find flat coord of max value, flat coord -> pic coord. 
-    gal_bg = bg_annulus(pic,aperture,gal_rowcol[1],gal_rowcol[0])
+    gal_int, gal_bg = aperture_photometry(aperture, gal_rowcol[1], gal_rowcol[0], pic)
     
-    out['rowcol-coords'] = gal_rowcol
+    out['xy-coords'] = (gal_rowcol[1],gal_rowcol[0])
     out['intensity'] = gal_int
     out['background'] = gal_bg
     mask_pic = cover_circle(aperture, gal_rowcol[1], gal_rowcol[0], pic)
@@ -259,8 +309,8 @@ if __name__ == "__main__":
         #plt.hist(nostar)
         ##################Write to CSV#######################
         print('Building Catalogue')
-        galaxies, nostar9 = build_catalogue(nostar8, 6, fmin = 3440) 
-        fieldnames = ['rowcol-coords','intensity','background']
+        galaxies, nostar9 = build_catalogue(nostar8, 40, fmin = 3440) 
+        fieldnames = ['xy-coords','intensity','background']
         writer = csv.DictWriter(f, fieldnames = fieldnames)
         
         writer.writeheader()
