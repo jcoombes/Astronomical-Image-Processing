@@ -93,7 +93,7 @@ def aperture_photometry(radius, centrex, centrey, pic):
     smaller_circle_coords = ((x,y) for x, y in circles(radius, centrex, centrey) \
               if 0 <= x < pic.shape[1] if 0<= y < pic.shape[0])
     
-    bigger_circle_coords =  ((x,y) for x, y in circles(radius, centrex, centrey) \
+    bigger_circle_coords =  ((x,y) for x, y in circles(radius * 2, centrex, centrey) \
                        if 0 <= x < pic.shape[1] if 0<= y < pic.shape[0])
     
     for x, y in smaller_circle_coords:
@@ -262,18 +262,8 @@ def magnitude(pic,f2):
         numpy array of magnitude values.
     """    
     return -2.5 * np.log10(pic/f2)
-    
-    
-"""
-#Using list comprehensions to filter array elements of pictrue > 36,000
-#Replace bright pixels with zero brightness
-newpic = np.empty((4611, 2570), int)
-for rowno in range(pic.shape[0]):
-    row = [x if x < 36000 else 0 for x in pic[rowno]]
-    newpic[rowno] = np.asarray(row)
-"""
 
-"***************************main code***********************************"
+#"***************************main code***********************************"
 if __name__ == "__main__":
     timestr = time.strftime("%Y%m%d-%H%M%S") + '.csv'
     with open(timestr, 'w') as f: #This .csv file will become our catalogue.
@@ -309,7 +299,7 @@ if __name__ == "__main__":
         #plt.hist(nostar)
         ##################Write to CSV#######################
         print('Building Catalogue')
-        galaxies, nostar9 = build_catalogue(nostar8, 40, fmin = 3440) 
+        galaxies, nostar9 = build_catalogue(nostar8, 6, fmin = 3440) 
         fieldnames = ['xy-coords','intensity','background']
         writer = csv.DictWriter(f, fieldnames = fieldnames)
         
