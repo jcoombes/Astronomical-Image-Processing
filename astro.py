@@ -370,18 +370,14 @@ def prettify_error_data(error_data, zeroval = 0.01):
     most_recent = error_data[error_data != zeroval][0]
     had_nonzero_yet = False
     
-    print(most_recent)
     for error_idx in range(len(error_data)):
         if error_data[error_idx] == zeroval:    
             pretty_error_data[error_idx] = most_recent
         elif had_nonzero_yet and error_data[error_idx] == 0:
             pretty_error_data[error_idx] = most_recent
-            print('most recent is now ' + str(most_recent))
         else:
             most_recent = error_data[error_idx]
-            if not had_nonzero_yet: print('We had a non zero')
             had_nonzero_yet = True
-            print('most recent is now ' + str(most_recent))
 
     return pretty_error_data
         
@@ -425,7 +421,7 @@ if __name__ == "__main__":
         #plt.hist(nostar)
         ##################Write to CSV#######################
         print('Building Catalogue')
-        galaxies, nostar9 = build_catalogue(nostar8, radius, fmin) 
+        #galaxies, nostar9 = build_catalogue(nostar8, radius, fmin) 
         fieldnames = ['xy-coords','intensity','intensity standard deviation','background','background standard deviation','magnitude','magnitude standard deviation']
         writer = csv.DictWriter(f, fieldnames = fieldnames)
         
@@ -436,13 +432,12 @@ if __name__ == "__main__":
        
         ####Plot Number of galaxies brighter than magnitude m########
         x_data, y_data, y_error = final(galaxies)
-#        plt.errorbar(x_data, y_data, yerr = y_error)
-#        pretty_y_error = prettify_error_data(y_data)
-#        plt.errorbar(x_data, y_data, yerr = pretty_y_error)
+        #plt.errorbar(x_data, y_data, yerr = y_error)
+        pretty_y_error = prettify_error_data(y_error)
         
         log_y_data = np.maximum(0, np.log10(y_data))
         log_y_error = np.abs(y_error/(y_data*np.log(10)))
-        pretty_log_y_error = np.abs(y_error/(y_data*np.log(10)))
+        pretty_log_y_error = np.abs(pretty_y_error/(y_data*np.log(10)))
     
         popt, perr = linear_fit(x_data[960:1800], log_y_data[960:1800], log_y_error[960:1800]) 
         y_fit_list = []
@@ -451,3 +446,17 @@ if __name__ == "__main__":
         
         plt.errorbar(x_data, log_y_data, log_y_error)    
         plt.plot(x_data[960:1800], y_fit_list[960:1800], linewidth = 2.5)
+        
+        
+        new_popt, new_perr = linear_fit(x_data[960:1800], log_y_data[960:1800], pretty_log_y_error[960:1800]) 
+        y_fit_list = []
+        for x in x_data:
+            y_fit_list.append(line(x, new_popt[0],new_popt[1]))
+        
+        plt.errorbar(x_data, log_y_data, pretty_log_y_error)    
+        plt.plot(x_data[960:1800], y_fit_list[960:1800], linewidth = 2.5)
+        
+        plt.xlabel('Magnitude m')
+        plt.ylabel('Logarithm of number of galaxies with magnitude less than m')
+        
+        plt.title('Galaxy number counts')
