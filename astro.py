@@ -8,18 +8,17 @@ Created on Thu Dec 01 14:08:10 2016
 from astropy.io import fits
 import numpy as np
 from scipy import stats #Used to find the mode. stats.mode(nostar)
+import scipy.optimize #Linear curve fit of galaxy numbers.
 import matplotlib.pyplot as plt
 import csv
 import time #used to uniquely name the catalogue files.
-
 
 def scale_lower(pic, dimmer=3600): 
     """Using for loop to replace bright pixels with dimmer value.
     Input:
         pic - numpy.array(), the image to be dimmed
         dimmer - int, how low should the "lowpass cutoff" be.
-        
-    Do I want to subtract off the Background count (=min(pic.flat)) before I replace with zero???!?!?!?!"""
+    """
     #most_common = stats.mode(pic)
     for rowno in range(pic.shape[0]):
         for colno in range(pic.shape[1]):
@@ -27,39 +26,6 @@ def scale_lower(pic, dimmer=3600):
                 pic[rowno][colno] = dimmer
 
     return pic
-
-#def bg_annulus(pic,radius,centrex,centrey,lower_limit_sigma=0.1):
-#
-#    mean = 3423.78
-#    lower_limit_galaxy_brightness = mean+lower_limit_sigma*13.5
-#    
-#    small_circle_list=[]
-#    large_circle_list=[]
-#    annular_list=[]
-#    small_circle= circles(radius,centrex,centrey)
-#    large_circle= circles(2*radius,centrex,centrey)
-#    for i in small_circle:
-#        small_circle_list.append(i)
-#    for i in large_circle:
-#        large_circle_list.append(i)
-#    for i in large_circle_list:
-#        if i not in small_circle_list:
-#            annular_list.append(i)
-#    
-#    local_background_pixel_values = []
-#    pixel_values_galaxy_var= []
-#
-#    for i in annular_list:
-#        if pic[i[1]][i[0]] >= lower_limit_galaxy_brightness:
-#            local_background_pixel_values.append(pic[i[1]][i[0]])
-#        else:
-#            local_background_pixel_values.append(mean)
-#    for i in small_circle_list:
-#        pixel_values_galaxy_var.append(pic[i[1]][i[0]])
-#    
-#    mean_local_background = sum(local_background_pixel_values)/len(local_background_pixel_values)
-#    
-#    return mean_local_background      
 
 def aperture_photometry(radius, centrex, centrey, pic):
     """
@@ -79,6 +45,29 @@ def aperture_photometry(radius, centrex, centrey, pic):
         circle_background -int, how much brightness correction was subtracted
                                 to give the corrected intensity count?
     """
+    
+    def magnitude(intensity, int_sd, magzpt, magzrr):
+        """
+        Returns the magnitudes of every element of the input.
+        Inputs:
+            intensity - numpy masked array.
+            int_sd - standard deviation of number of counts.
+            magzpt - float, calibration magnitude.
+            magzrr - float, magnitude zero error.
+        
+        Returns:
+            mag - output magnitude masked array.
+            mag_sd - magnitude standard deviation array.
+        """
+        
+        mag_i = -2.5 * np.log10(intensity)
+        err_i = np.absolute((2.5*int_sd)/(intensity*np.log(10)))
+        
+        mag = magzpt + mag_i
+        mag_sd = np.sqrt(magzrr*magzrr + err_i*err_i)
+                
+        return mag, mag_sd
+    
     assert type(pic) == np.ma.core.MaskedArray
     
     rows = [] #These two lists are used with advanced array slicing
@@ -117,7 +106,32 @@ def aperture_photometry(radius, centrex, centrey, pic):
     circle_background = annulus_array.mean() * circle_array.count()
     correct_intensity = total_count - circle_background 
     
-    return correct_intensity, circle_background #This result scales with aperture size ^2. 
+    #If we assume the only source of noise in our counts is shot noise.
+    #Ignore Bias structure.
+    #Ignore dark current.
+    #Ignore flat fielding.
+    #Ignore interpolation errors.
+    #Ignore Charge transfer efficiency problems.
+    #Ignore charge skimming.
+    #Ignore shutter vignetting.
+    circle_variances = circle_array.copy() #Variance = mean (mu) for poisson data.
+    overall_variance = circle_variances.sum() #not including annular background correction errors yet.
+    
+    #How much error is in our background annulus?
+    background_variances = annulus_array.copy()
+    background_combined_variance = background_variances.sum()/(background_variances.count()*background_variances.count())
+    circle_background_variance = circle_array.count() * background_combined_variance
+    background_sd = np.sqrt(circle_background_variance) #standard deviation of circle bg correction.
+    
+    correct_variance = overall_variance + circle_background_variance
+    correct_sd = np.sqrt(correct_variance)
+     
+    magzpt = hdulist[0].header['MAGZPT']
+    magzrr = hdulist[0].header['MAGZRR']
+    
+    mag, mag_sd = magnitude(correct_intensity, correct_sd, magzpt, magzrr)
+
+    return correct_intensity, correct_sd, circle_background, background_sd, mag, mag_sd #This result scales with aperture size ^2. 
 
 def cover_box(xmin, xmax, ymin, ymax, pic):
     """
@@ -193,17 +207,23 @@ def mask_to_cat(pic, aperture = 6, out = None):
         out = {}    # mutating between function calls.
     gal_rowcol = np.unravel_index(pic.argmax(),pic.shape)
     #flatten array, find flat coord of max value, flat coord -> pic coord. 
-    gal_int, gal_bg = aperture_photometry(aperture, gal_rowcol[1], gal_rowcol[0], pic)
+    gal_int, gal_int_sd, gal_bg, gal_bg_sd, mag, mag_sd = aperture_photometry(aperture, gal_rowcol[1], gal_rowcol[0], pic)
+    
+    
     
     out['xy-coords'] = (gal_rowcol[1],gal_rowcol[0])
     out['intensity'] = gal_int
+    out['intensity standard deviation'] = gal_int_sd
     out['background'] = gal_bg
+    out['background standard deviation'] = gal_bg_sd
+    out['magnitude'] = mag
+    out['magnitude standard deviation'] = mag_sd
     mask_pic = cover_circle(aperture, gal_rowcol[1], gal_rowcol[0], pic)
     return mask_pic, out
 
 def build_catalogue(pic, aperture = 6, fmin = 3500):
     """
-    Uses mask to cat to get store all the galaxies in the sky in a ditionary.
+    Uses mask to cat to get store all the galaxies in the sky in a list.
     
     Inputs:
         pic - 2d masked array, image of sky.
@@ -251,22 +271,130 @@ def for_catalogue(pic, aperture = 6, how_many = 2000):
         new_pic, gal_data = mask_to_cat(new_pic, aperture, None)
         galaxies.append(gal_data)
     return galaxies, new_pic
-  
-def magnitude(pic,f2):
-    """
-    Inputs:
-        pic - numpy array of brightness values.
-        f2 - magnitude zero point, magzpt from fits header data.
-        
-    Outputs:
-        numpy array of magnitude values.
-    """    
-    return -2.5 * np.log10(pic/f2)
 
-#"***************************main code***********************************"
+def final(galaxies):
+    """
+    Returns the data needed to make a plot of number of galaxies brighter than a
+    given magnitude.
+    
+    Input:
+        galaxies - list of dictionaries, dictionaries have value called intensity.
+    
+    Returns:
+        x, y, y_err, linear_fit_params
+    """
+    def number_of_gal_less_than_m(magnitudes, magnitudes_sd, benchmark):
+        """
+        Returns the humber of things less than a benchmark.
+        Thing error is calculated by bootstrapping.
+        
+        Input:
+            magnitudes - numpy 1d array of galaxy magnitudes.
+            magnitudes_sd - numpy 1d array of galaxy standard deviations.
+        
+        Returns:
+            how_many_things - numpy 1d array, number of things are less than benchmark.  
+            thing_error - numpy 1d array, how big is the standard deviation on the number.
+        """
+        magplus1sigma = magnitudes + magnitudes_sd
+        magminus1sigma = magnitudes - magnitudes_sd
+        
+        how_many_things_pessimistic = np.sum(magplus1sigma < benchmark)
+        number_of_things = np.sum(magnitudes < benchmark)
+        how_many_things_optimistic =  np.sum(magminus1sigma < benchmark)
+        
+        error_up = how_many_things_optimistic - number_of_things
+        error_down = number_of_things - how_many_things_pessimistic
+        
+        #Unfortunately our curve fitting doesn't work with asymmetric error bars.
+        #We combine the two by just finding the mean of the upper and lower bar.
+        thing_error = np.maximum(1e-2, (np.absolute(error_up) + np.absolute(error_down)))
+        
+        return number_of_things, thing_error
+       
+    magnitudes = np.fromiter((i['magnitude'] for i in galaxies\
+                              if i['magnitude'] != 0 \
+                              and i['magnitude'] != np.inf),dtype = float)
+    
+    magnitudes_sd = np.fromiter((i['magnitude standard deviation'] for i in galaxies\
+                                 if i['magnitude standard deviation'] != 0\
+                                 and i['magnitude standard deviation'] != np.inf), dtype = float)
+    
+    x = np.arange(0,30,0.01)
+    y_list =[]
+    y_err_list = []
+    
+    for m in x:
+        num, error = number_of_gal_less_than_m(magnitudes, magnitudes_sd, m)
+        y_list.append(num)
+        y_err_list.append(error)
+        
+    y = np.array(y_list)
+    y_error = np.array(y_err_list)
+    
+    return x, y, y_error
+    
+def line(x, a, b):
+    """
+    literally a*x+b
+    Inputs:
+        x, float, independant variable.
+        a, float, gradient
+        b, float, intercept.
+    Returns:
+        y, float, height of the line
+    """
+    return a*x + b
+    
+def linear_fit(xdata, ydata, y_error):
+    """
+    Fits a straight line to a segment of the data.
+    """
+    f = line
+    popt, pcov = scipy.optimize.curve_fit(f, xdata, ydata, p0=(0.38, -3.3), sigma = y_error, absolute_sigma=True)
+    perr = np.sqrt(np.diag(pcov)) #Parameter standard deviation.
+
+    return popt, perr
+
+def prettify_error_data(error_data, zeroval = 0.01):
+    """
+    fills every 'zero' value with the value of the most recent non-zero value to the left. This copies it's neighbours.
+
+    Inputs:
+    error_data = np.array 1-d. Your errors, 
+
+    Returns:
+    pretty_error_data = np.array 1-d. Your prettier  plaigarised neighbourr errors
+    """
+    pretty_error_data = error_data.copy()
+    most_recent = error_data[error_data != zeroval][0]
+    had_nonzero_yet = False
+    
+    print(most_recent)
+    for error_idx in range(len(error_data)):
+        if error_data[error_idx] == zeroval:    
+            pretty_error_data[error_idx] = most_recent
+        elif had_nonzero_yet and error_data[error_idx] == 0:
+            pretty_error_data[error_idx] = most_recent
+            print('most recent is now ' + str(most_recent))
+        else:
+            most_recent = error_data[error_idx]
+            if not had_nonzero_yet: print('We had a non zero')
+            had_nonzero_yet = True
+            print('most recent is now ' + str(most_recent))
+
+    return pretty_error_data
+        
+"***************************main code***********************************"
 if __name__ == "__main__":
-    timestr = time.strftime("%Y%m%d-%H%M%S") + '.csv'
-    with open(timestr, 'w') as f: #This .csv file will become our catalogue.
+    radius = 6
+    fmin = 3500
+    filestr = time.strftime("%Y%m%d-%H%M%S") \
+                + 'r' + str(radius) + 'f' + str(fmin) + '.csv'
+    
+    #The .csv file name, filestr, contains the time, radius, minimum flux.
+    
+    with open(filestr, 'w') as f: #This .csv file will become our catalogue.
         #open and slice the fits data.
         hdulist = fits.open("C:\\Users\Joaquin\Documents\Year 3\Astronomical Image Processing\A1_mosaic.fits")
     
@@ -279,7 +407,7 @@ if __name__ == "__main__":
         print('Beginning preprocessing')
         new = pic.copy()
         #new = scale_lower(new)
-        print('rescaled. Removing artifacts.')
+        print('Removing artifacts.')
         remove_starline = cover_box(1050,1080,0,3419,new)
         nostar = cover_circle(250,1070,2320, remove_starline)
         nostar2 = cover_box(150,230,3180,3230,nostar)
@@ -293,17 +421,33 @@ if __name__ == "__main__":
         
         #display image
         #plt.colorbar(plt.imshow(nostar8, origin = 'lower', cmap = 'gray'))
-        
-        #plt.yscale('linear', nonposy='clip')
         #plt.yscale('log', nonposy='clip')
         #plt.hist(nostar)
         ##################Write to CSV#######################
         print('Building Catalogue')
-        galaxies, nostar9 = build_catalogue(nostar8, 6, fmin = 3440) 
-        fieldnames = ['xy-coords','intensity','background']
+        galaxies, nostar9 = build_catalogue(nostar8, radius, fmin) 
+        fieldnames = ['xy-coords','intensity','intensity standard deviation','background','background standard deviation','magnitude','magnitude standard deviation']
         writer = csv.DictWriter(f, fieldnames = fieldnames)
         
         writer.writeheader()
         writer.writerows(galaxies)
         
-        plt.colorbar(plt.imshow(nostar9, origin = 'lower', cmap = 'gray'))
+        #plt.colorbar(plt.imshow(nostar9, origin = 'lower', cmap = 'gray'))
+       
+        ####Plot Number of galaxies brighter than magnitude m########
+        x_data, y_data, y_error = final(galaxies)
+#        plt.errorbar(x_data, y_data, yerr = y_error)
+#        pretty_y_error = prettify_error_data(y_data)
+#        plt.errorbar(x_data, y_data, yerr = pretty_y_error)
+        
+        log_y_data = np.maximum(0, np.log10(y_data))
+        log_y_error = np.abs(y_error/(y_data*np.log(10)))
+        pretty_log_y_error = np.abs(y_error/(y_data*np.log(10)))
+    
+        popt, perr = linear_fit(x_data[960:1800], log_y_data[960:1800], log_y_error[960:1800]) 
+        y_fit_list = []
+        for x in x_data:
+            y_fit_list.append(line(x, popt[0],popt[1]))
+        
+        plt.errorbar(x_data, log_y_data, log_y_error)    
+        plt.plot(x_data[960:1800], y_fit_list[960:1800], linewidth = 2.5)
