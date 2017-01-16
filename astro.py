@@ -61,7 +61,7 @@ def aperture_photometry(radius, centrex, centrey, pic):
         """
         
         mag_i = -2.5 * np.log10(intensity)
-        err_i = np.absolute((2.5*int_sd)/(intensity*np.log(10)))
+        err_i = np.absolute((2.5*int_sd)/(np.maximum(1e-2,intensity)*np.log(10)))
         
         mag = magzpt + mag_i
         mag_sd = np.sqrt(magzrr*magzrr + err_i*err_i)
@@ -383,8 +383,8 @@ def prettify_error_data(error_data, zeroval = 0.01):
         
 "***************************main code***********************************"
 if __name__ == "__main__":
-    radius = 6
-    fmin = 3500
+    radius = 12
+    fmin = 3440
     filestr = time.strftime("%Y%m%d-%H%M%S") \
                 + 'r' + str(radius) + 'f' + str(fmin) + '.csv'
     
@@ -421,7 +421,7 @@ if __name__ == "__main__":
         #plt.hist(nostar)
         ##################Write to CSV#######################
         print('Building Catalogue')
-        #galaxies, nostar9 = build_catalogue(nostar8, radius, fmin) 
+        galaxies, nostar9 = build_catalogue(nostar8, radius, fmin) 
         fieldnames = ['xy-coords','intensity','intensity standard deviation','background','background standard deviation','magnitude','magnitude standard deviation']
         writer = csv.DictWriter(f, fieldnames = fieldnames)
         
@@ -438,25 +438,33 @@ if __name__ == "__main__":
         log_y_data = np.maximum(0, np.log10(y_data))
         log_y_error = np.abs(y_error/(y_data*np.log(10)))
         pretty_log_y_error = np.abs(pretty_y_error/(y_data*np.log(10)))
-    
-        popt, perr = linear_fit(x_data[960:1800], log_y_data[960:1800], log_y_error[960:1800]) 
-        y_fit_list = []
-        for x in x_data:
-            y_fit_list.append(line(x, popt[0],popt[1]))
-        
-        plt.errorbar(x_data, log_y_data, log_y_error)    
-        plt.plot(x_data[960:1800], y_fit_list[960:1800], linewidth = 2.5)
-        
         
         new_popt, new_perr = linear_fit(x_data[960:1800], log_y_data[960:1800], pretty_log_y_error[960:1800]) 
         y_fit_list = []
         for x in x_data:
             y_fit_list.append(line(x, new_popt[0],new_popt[1]))
         
-        plt.errorbar(x_data, log_y_data, pretty_log_y_error)    
-        plt.plot(x_data[960:1800], y_fit_list[960:1800], linewidth = 2.5)
+        plt.errorbar(x_data, log_y_data, pretty_log_y_error, color =  'black')    
+        plt.plot(x_data[960:1800], y_fit_list[960:1800], linewidth = 2.5,  color = 'blue')
         
         plt.xlabel('Magnitude m')
         plt.ylabel('Logarithm of number of galaxies with magnitude less than m')
         
         plt.title('Galaxy number counts')
+        plt.grid()
+        plt.text(15.6,2,'gradient = ' + '{:.4f}'.format(new_popt[0]) + '±' + '{:.4f}'.format(new_perr[0]))
+        
+       y_fit = np.array(y_fit_list)
+#       residuals = log_y_data - y_fit
+#       plt.errorbar(x_data, residuals, pretty_log_y_error, color = 'black')
+#       plt.errorbar(x_data[960:1800], residuals[960:1800], pretty_log_y_error[960:1800], color = 'blue')
+
+#       plt.ylabel('Difference between Data and Fit')
+#       plt.title('Residual Plot')
+#       plt.xlabel('Magnitude')
+#       plt.grid()
+
+        squares = (log_y_data[960:1800] - np.mean(log_y_data[960:1800]))**2
+        square_residuals = (log_y_data[960:1800] - y_fit[960:1800])**2
+
+        coefficient_of_determination = 1 - (np.sum(square_residuals)/np.sum(squares))
